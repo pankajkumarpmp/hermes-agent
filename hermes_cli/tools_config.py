@@ -1715,6 +1715,20 @@ def _save_platform_tools(config: dict, platform: str, enabled_toolset_keys: Set[
     # Merge preserved entries with new enabled toolsets
     config["platform_toolsets"][platform] = sorted(enabled_toolset_keys | preserved_entries)
 
+    # A platform save is an explicit enable. Clear stale global suppressions
+    # from minimal installs so the dashboard/CLI selection is effective.
+    agent_cfg = config.get("agent")
+    if isinstance(agent_cfg, dict):
+        disabled_toolsets = agent_cfg.get("disabled_toolsets")
+        if isinstance(disabled_toolsets, list):
+            enabled_names = {str(ts) for ts in enabled_toolset_keys}
+            retained_disabled = [
+                ts for ts in disabled_toolsets
+                if str(ts) not in enabled_names
+            ]
+            if len(retained_disabled) != len(disabled_toolsets):
+                agent_cfg["disabled_toolsets"] = retained_disabled
+
     # Track which plugin toolsets are "known" for this platform so we can
     # distinguish "new plugin, default enabled" from "user disabled it".
     if plugin_keys:
@@ -3912,6 +3926,15 @@ def _configure_mcp_tools_interactive(config: dict):
 def _apply_toolset_change(config: dict, platform: str, toolset_names: List[str], action: str):
     """Add or remove built-in toolsets for a platform."""
     enabled = _get_platform_tools(config, platform, include_default_mcp_servers=False)
+    existing_toolsets = cfg_get(config, "platform_toolsets", platform, default=[])
+    if isinstance(existing_toolsets, list):
+        valid_toolsets = {ts_key for ts_key, _, _ in CONFIGURABLE_TOOLSETS}
+        valid_toolsets |= _get_plugin_toolset_keys()
+        enabled |= {
+            str(ts) for ts in existing_toolsets
+            if str(ts) in valid_toolsets
+            and _toolset_allowed_for_platform(str(ts), platform)
+        }
     if action == "disable":
         updated = enabled - set(toolset_names)
     else:

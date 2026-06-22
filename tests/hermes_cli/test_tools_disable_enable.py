@@ -59,6 +59,35 @@ class TestToolsEnableBuiltin:
         saved = mock_save.call_args[0][0]
         assert saved["platform_toolsets"]["cli"].count("web") == 1
 
+    def test_enable_removes_toolset_from_global_disabled_list(self):
+        config = {
+            "platform_toolsets": {"cli": ["terminal"]},
+            "agent": {"disabled_toolsets": ["web", "memory"]},
+        }
+        with patch("hermes_cli.tools_config.load_config", return_value=config), \
+             patch("hermes_cli.tools_config.save_config") as mock_save:
+            tools_disable_enable_command(Namespace(tools_action="enable", names=["web"], platform="cli"))
+        saved = mock_save.call_args[0][0]
+        assert "web" in saved["platform_toolsets"]["cli"]
+        assert "web" not in saved["agent"]["disabled_toolsets"]
+        assert "memory" in saved["agent"]["disabled_toolsets"]
+
+    def test_enable_preserves_explicit_toolsets_hidden_by_global_disabled_list(self):
+        config = {
+            "platform_toolsets": {"cli": ["code_execution", "file", "terminal", "web"]},
+            "agent": {"disabled_toolsets": ["code_execution", "web", "skills"]},
+        }
+        with patch("hermes_cli.tools_config.load_config", return_value=config), \
+             patch("hermes_cli.tools_config.save_config") as mock_save:
+            tools_disable_enable_command(Namespace(tools_action="enable", names=["skills"], platform="cli"))
+        saved = mock_save.call_args[0][0]
+        assert "code_execution" in saved["platform_toolsets"]["cli"]
+        assert "web" in saved["platform_toolsets"]["cli"]
+        assert "skills" in saved["platform_toolsets"]["cli"]
+        assert "code_execution" not in saved["agent"]["disabled_toolsets"]
+        assert "web" not in saved["agent"]["disabled_toolsets"]
+        assert "skills" not in saved["agent"]["disabled_toolsets"]
+
 
 # ── MCP tool disable ────────────────────────────────────────────────────────
 
