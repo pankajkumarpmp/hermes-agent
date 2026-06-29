@@ -31,6 +31,25 @@ def _forum_message(chat_id=-100, is_forum=True):
 
 
 @pytest.mark.asyncio
+async def test_refresh_skill_group_reregisters_global_commands_and_clears_forum_cache():
+    adapter = _make_test_adapter()
+    adapter._forum_command_registered.update({-100, -200})
+
+    with patch("hermes_cli.commands.telegram_menu_commands") as mock_menu:
+        mock_menu.return_value = ([("caveman", "Caveman mode"), ("caveman_help", "Help")], 0)
+        with patch("telegram.BotCommand") as MockBotCommand:
+            MockBotCommand.side_effect = lambda name, desc: SimpleNamespace(name=name, description=desc)
+            await adapter.refresh_skill_group()
+
+    assert adapter._forum_command_registered == set()
+    assert adapter._bot.set_my_commands.await_count == 3
+    for call in adapter._bot.set_my_commands.await_args_list:
+        args, kwargs = call
+        assert [cmd.name for cmd in args[0]] == ["caveman", "caveman_help"]
+        assert kwargs["scope"] is not None
+
+
+@pytest.mark.asyncio
 async def test_ensure_forum_commands_skips_non_forum():
     adapter = _make_test_adapter()
     msg = _forum_message(is_forum=False)

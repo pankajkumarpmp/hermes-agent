@@ -2513,51 +2513,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     error_callback=_polling_error_callback,
                 )
             
-            # Register bot commands so Telegram shows a hint menu when users type /
-            # List is derived from the central COMMAND_REGISTRY — adding a new
-            # gateway command there automatically adds it to the Telegram menu.
-            try:
-                from telegram import (
-                    BotCommand,
-                    BotCommandScopeAllPrivateChats,
-                    BotCommandScopeAllGroupChats,
-                    BotCommandScopeDefault,
-                )
-                from hermes_cli.commands import telegram_menu_commands, telegram_menu_max_commands
-                # Telegram allows up to 100 commands but has an undocumented
-                # payload size limit (~4KB total).  Hermes defaults to 60 to
-                # keep built-ins plus common skill commands visible while
-                # staying under the threshold; users can tune the cap via
-                # platforms.telegram.extra.command_menu.
-                max_commands = telegram_menu_max_commands()
-                menu_commands, hidden_count = telegram_menu_commands(max_commands=max_commands)
-                bot_commands = [BotCommand(name, desc) for name, desc in menu_commands]
-                # Register for all scopes independently — Telegram picks the
-                # narrowest matching scope per chat type (forum topics fall
-                # through to AllGroupChats or Default).
-                for scope_cls in (BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats):
-                    scope_name = scope_cls.__name__
-                    try:
-                        await self._bot.set_my_commands(bot_commands, scope=scope_cls())
-                        logger.info("[%s] set_my_commands OK for scope %s (%d cmds)", self.name, scope_name, len(bot_commands))
-                    except Exception as scope_err:
-                        logger.warning("[%s] set_my_commands FAILED for scope %s: %s", self.name, scope_name, scope_err)
-                # Forum topics don't inherit AllGroupChats — Telegram resolves
-                # commands via BotCommandScopeChat(chat_id) for forum groups.
-                # Lazy registration happens in _ensure_forum_commands on first
-                # message from a forum topic (see _handle_text_message).
-                if hidden_count:
-                    logger.info(
-                        "[%s] Telegram menu: %d commands registered, %d hidden (over %d limit). Use /commands for full list.",
-                        self.name, len(menu_commands), hidden_count, max_commands,
-                    )
-            except Exception as e:
-                logger.warning(
-                    "[%s] Could not register Telegram command menu: %s",
-                    self.name,
-                    e,
-                    exc_info=True,
-                )
+            await self._register_bot_commands()
             
             self._mark_connected()
             mode = "webhook" if self._webhook_mode else "polling"
@@ -2599,6 +2555,54 @@ class TelegramAdapter(BasePlatformAdapter):
             self._set_fatal_error("telegram_connect_error", message, retryable=True)
             logger.error("[%s] Failed to connect to Telegram: %s", self.name, e, exc_info=True)
             return False
+
+    async def _register_bot_commands(self) -> None:
+        """Register Telegram BotCommand menu from current core + skill commands."""
+        if self._bot is None:
+            return
+        # Register bot commands so Telegram shows a hint menu when users type /
+        # List is derived from the central COMMAND_REGISTRY plus loaded skills.
+        try:
+            from telegram import (
+                BotCommand,
+                BotCommandScopeAllPrivateChats,
+                BotCommandScopeAllGroupChats,
+                BotCommandScopeDefault,
+            )
+            from hermes_cli.commands import telegram_menu_commands, telegram_menu_max_commands
+            # Telegram allows up to 100 commands but has an undocumented
+            # payload size limit (~4KB total). Hermes defaults to 60 to keep
+            # built-ins plus common skill commands visible while staying under
+            # the threshold; users can tune the cap via command_menu config.
+            max_commands = telegram_menu_max_commands()
+            menu_commands, hidden_count = telegram_menu_commands(max_commands=max_commands)
+            bot_commands = [BotCommand(name, desc) for name, desc in menu_commands]
+            # Register for all scopes independently — Telegram picks the
+            # narrowest matching scope per chat type.
+            for scope_cls in (BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats):
+                scope_name = scope_cls.__name__
+                try:
+                    await self._bot.set_my_commands(bot_commands, scope=scope_cls())
+                    logger.info("[%s] set_my_commands OK for scope %s (%d cmds)", self.name, scope_name, len(bot_commands))
+                except Exception as scope_err:
+                    logger.warning("[%s] set_my_commands FAILED for scope %s: %s", self.name, scope_name, scope_err)
+            if hidden_count:
+                logger.info(
+                    "[%s] Telegram menu: %d commands registered, %d hidden (over %d limit). Use /commands for full list.",
+                    self.name, len(menu_commands), hidden_count, max_commands,
+                )
+        except Exception as e:
+            logger.warning(
+                "[%s] Could not register Telegram command menu: %s",
+                self.name,
+                e,
+                exc_info=True,
+            )
+
+    async def refresh_skill_group(self) -> None:
+        """Refresh Telegram command menu after /reload-skills."""
+        await self._register_bot_commands()
+        self._forum_command_registered.clear()
 
     async def _set_status_indicator(self, online: bool) -> None:
         """Set the bot's short description to the online/offline status text.
