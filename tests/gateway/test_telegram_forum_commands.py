@@ -35,9 +35,23 @@ async def test_refresh_skill_group_reregisters_global_commands_and_clears_forum_
     adapter = _make_test_adapter()
     adapter._forum_command_registered.update({-100, -200})
 
+    class DummyDefaultScope:
+        pass
+
+    class DummyPrivateScope:
+        pass
+
+    class DummyGroupScope:
+        pass
+
     with patch("hermes_cli.commands.telegram_menu_commands") as mock_menu:
         mock_menu.return_value = ([("caveman", "Caveman mode"), ("caveman_help", "Help")], 0)
-        with patch("telegram.BotCommand") as MockBotCommand:
+        with (
+            patch("telegram.BotCommand") as MockBotCommand,
+            patch("telegram.BotCommandScopeDefault", DummyDefaultScope),
+            patch("telegram.BotCommandScopeAllPrivateChats", DummyPrivateScope),
+            patch("telegram.BotCommandScopeAllGroupChats", DummyGroupScope),
+        ):
             MockBotCommand.side_effect = lambda name, desc: SimpleNamespace(name=name, description=desc)
             await adapter.refresh_skill_group()
 
