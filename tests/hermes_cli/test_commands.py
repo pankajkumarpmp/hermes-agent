@@ -1432,6 +1432,38 @@ class TestTelegramMenuCommands:
             "prefix-match sibling directories must not be admitted"
         )
 
+    def test_windows_backslash_skill_paths_included_in_telegram_menu(self, tmp_path, monkeypatch):
+        """Windows-style skill_md_path values must match allowed skill dirs.
+
+        Regression: gateway menu filtering normalized allowed prefixes with
+        forward slashes but compared them to raw backslash paths, hiding local
+        skills from Telegram on Windows.
+        """
+        from unittest.mock import patch
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        local_dir = tmp_path / "skills"
+        local_dir.mkdir()
+
+        local_skill_md = str(local_dir / "caveman" / "SKILL.md").replace("/", "\\")
+        fake_cmds = {
+            "/caveman": {
+                "name": "caveman",
+                "description": "Terse replies",
+                "skill_md_path": local_skill_md,
+                "skill_dir": str(local_dir / "caveman").replace("/", "\\"),
+            },
+        }
+
+        with (
+            patch("agent.skill_commands.get_skill_commands", return_value=fake_cmds),
+            patch("tools.skills_tool.SKILLS_DIR", local_dir),
+            patch("agent.skill_utils.get_external_skills_dirs", return_value=[]),
+        ):
+            menu, _ = telegram_menu_commands(max_commands=100)
+
+        assert "caveman" in {n for n, _ in menu}
+
     def test_special_chars_in_skill_names_sanitized(self, tmp_path, monkeypatch):
         """Skills with +, /, or other special chars produce valid Telegram names."""
         from unittest.mock import patch
