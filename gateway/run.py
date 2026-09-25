@@ -166,6 +166,23 @@ def _ensure_windows_gateway_venv_imports() -> None:
             continue
         seen.add(venv_key)
 
+        # A managed launch may have switched Python versions since this legacy
+        # venv was created. Never import another ABI's binary extensions (or
+        # execute its .pth files). Unknown metadata is not safe to activate.
+        try:
+            metadata = (resolved_venv / "pyvenv.cfg").read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError):
+            continue
+        versions = []
+        for line in metadata.splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip() in {"version", "version_info"}:
+                match = re.match(r"^(\d+)\.(\d+)(?:\.|\s|$)", value.strip())
+                if match:
+                    versions.append(tuple(map(int, match.groups())))
+        if not versions or any(version != sys.version_info[:2] for version in versions):
+            continue
+
         site_packages = resolved_venv / "Lib" / "site-packages"
         if not site_packages.exists():
             continue

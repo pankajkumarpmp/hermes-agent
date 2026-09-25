@@ -230,6 +230,10 @@ def test_windows_gateway_venv_imports_add_site_packages(monkeypatch, tmp_path):
     pth_extra = tmp_path / "pywin32_system32"
     site_packages.mkdir(parents=True)
     pth_extra.mkdir()
+    (venv_dir / "pyvenv.cfg").write_text(
+        f"version_info = {gateway_run.sys.version_info.major}.{gateway_run.sys.version_info.minor}.0\n",
+        encoding="utf-8",
+    )
     (site_packages / "pywin32.pth").write_text(str(pth_extra), encoding="utf-8")
     project_root = str(gateway_run.Path(gateway_run.__file__).resolve().parent.parent)
 
@@ -245,6 +249,30 @@ def test_windows_gateway_venv_imports_add_site_packages(monkeypatch, tmp_path):
     assert gateway_run.os.environ["VIRTUAL_ENV"] == str(venv_dir.resolve())
     pythonpath = gateway_run.os.environ["PYTHONPATH"].split(gateway_run.os.pathsep)
     assert pythonpath[:3] == [project_root, str(site_packages), "already-there"]
+
+
+@pytest.mark.parametrize("metadata", [None, "version = invalid\n", "version = 2.7.18\n", "version_info = 2.7.18\n"])
+def test_windows_gateway_rejects_unknown_or_foreign_abi(monkeypatch, tmp_path, metadata):
+    root = tmp_path / "project"
+    candidate = root / "venv"
+    packages = candidate / "Lib" / "site-packages"
+    packages.mkdir(parents=True)
+    if metadata is not None:
+        (candidate / "pyvenv.cfg").write_text(metadata, encoding="utf-8")
+    monkeypatch.setattr(gateway_run, "__file__", str(root / "gateway" / "run.py"))
+    monkeypatch.setattr(gateway_run.sys, "platform", "win32")
+    monkeypatch.setattr(gateway_run.sys, "path", ["managed-packages"])
+    monkeypatch.setenv("VIRTUAL_ENV", str(candidate))
+    monkeypatch.setenv("PYTHONPATH", "managed-packages")
+    add_site = MagicMock()
+    monkeypatch.setattr(gateway_run.site, "addsitedir", add_site)
+
+    gateway_run._ensure_windows_gateway_venv_imports()
+
+    add_site.assert_not_called()
+    assert gateway_run.sys.path == ["managed-packages"]
+    assert gateway_run.os.environ["PYTHONPATH"] == "managed-packages"
+    assert gateway_run.os.environ["VIRTUAL_ENV"] == str(candidate)
 
 
 @pytest.mark.asyncio
